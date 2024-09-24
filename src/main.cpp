@@ -5,40 +5,30 @@
 #include <ArduinoJson.h>
 #include<DHT.h>
 #include <cmath>
-
-#define ledGPIO 13  //define for light
-#define fanGPIO 12  //define for fan
-#define airConditioner 14 //define for air conditioner
-#define dht11GPIO 5 // define for humidity and temperature
+#define ledGPIO 13 
+#define fanGPIO 12  
+#define airConditioner 14 
+#define dht11GPIO 5 
 #define DHTTYPE DHT11
-#define lightGPIO 34 // su dung de do anh sang 
-const char* sensorData = "home/sensor";  // tra ve ten topic va du lieu la 0 or 1, 1 la on , 0 la off
-const char* statusLight = "home/light";
-const char*  statusFan =  "home/fan";
-const char* statusAirConditioner =  "home/air_conditioner";
-
+#define lightGPIO 34
+const char* sensorData = "home/sensor/data";  
+const char* statusLedRequest = "home/led/request";
+const char*  statusFanRequest =  "home/fan/request";
+const char* statusAirConditionerRequest =  "home/air_conditioner/request";
+const char* statusLedResponse = "home/led/response";
+const char*  statusFanResponse =  "home/fan/response";
+const char* statusAirConditionerResponse =  "home/air_conditioner/response";
 DHT dht(dht11GPIO, DHTTYPE);
-
-
 const char *ssid = "NhatroT4"; // wifi name
 const char* password = "ngocmai284"; //wifi password
-
-
-// config server
-const char* mqtt_server = "c95f11febd0e4f36a313eb8f5b4dd763.s1.eu.hivemq.cloud";
-const  int mqtt_port = 8883;
+const char* mqtt_server = "192.168.2.7";
+const  int mqtt_port = 1883;
 const char* mqtt_username = "maybetuandat";
-const char* mqtt_password = "123456789aA@";
-
-
-// set time use for send data to hivemmq cloud 1 minute
-
-const unsigned long sendInterval = 6000;
+const char* mqtt_password = "1";
+const unsigned long sendInterval = 5000;
 unsigned long lastSend = 0;
-WiFiClientSecure espClient;
+WiFiClient espClient;
 PubSubClient client(espClient);
-
-
 void connect_mqtt_broker()
 {
   while(!client.connected())
@@ -49,9 +39,9 @@ void connect_mqtt_broker()
     if(client.connect(clientID.c_str(),  mqtt_username, mqtt_password))
     {
       Serial.println("Connected to MQTT Broker");
-      client.subscribe(statusLight);
-      client.subscribe(statusFan);
-      client.subscribe(statusAirConditioner);
+      client.subscribe(statusLedRequest);
+      client.subscribe(statusFanRequest);
+      client.subscribe(statusAirConditionerRequest);
     }
     else
     {
@@ -62,73 +52,76 @@ void connect_mqtt_broker()
   }
 }
 float roundTo(float value, int decimalPlaces) {
-    float factor = pow(10.0, decimalPlaces);
-    return round(value * factor) / factor;
+    float factor = powf(10.0f, decimalPlaces);  
+    return roundf(value * factor) / factor;     
 }
 void publich_message_data(const char* topic)
 {
-    StaticJsonDocument<256> jsonDoc;   // light -> fan -> air conditioner  //0 la off , 1 là on 
-    jsonDoc["light"] = digitalRead(ledGPIO);
-    jsonDoc["fan"] = digitalRead(fanGPIO);
-    jsonDoc["air_conditioner"] = digitalRead(airConditioner);
-    jsonDoc["temperature"] = roundTo(dht.readTemperature(),2);
-    jsonDoc["humidity"] = roundTo(dht.readHumidity(), 2);
+    StaticJsonDocument<256> jsonDoc;   
+    float temperature = roundTo(dht.readTemperature(),2);
+    jsonDoc["temperature"] = temperature;
+    jsonDoc["humidity"] = dht.readHumidity();
     if(isnan(dht.readTemperature()) || isnan(dht.readHumidity()))
     {
       Serial.println("Failed to read from DHT sensor");
       return;
     }
-    int analogValue = analogRead(lightGPIO);
-     float voltage = (analogValue / 4095.0) * 3.3;
-    jsonDoc["light_level"] = voltage;
+    int analogValue = 4095 - analogRead(lightGPIO);
+    jsonDoc["light_level"] = analogValue;
     char buffer[256];
     serializeJson(jsonDoc, buffer);  
     Serial.println(buffer);
     client.publish(topic, buffer);
 } 
-void public_message_status_device(const char* topic, const char* message)
-{
-    client.publish(topic, message);  //  sử dụng để trả lại trạng thái khi click nút   sẽ thêm sau 
-}
 void call_back(char* topic, byte* payload, unsigned int length)
 {
     String incoming_message = "";
-    for(int i=0; i<length; i++) incoming_message += (char)payload[i];  // call_back cần sửa thêm 
+    for(int i=0; i<length; i++) incoming_message += (char)payload[i]; 
      Serial.print(topic);
-    
-     Serial.print(" ");             // In ra một khoảng trắng để phân cách
-     Serial.println(incoming_message); // In ra giá trị của incoming_message và xuống dòng
-
-    if(strcmp(topic,statusLight)  == 0)
+     Serial.print(" ");           
+     Serial.println(incoming_message);
+    if(strcmp(topic,statusLedRequest)  == 0)
     { 
-      // Serial.println("Light");
       if(incoming_message == "1")
-        digitalWrite(ledGPIO, HIGH);
-        
-      else if(incoming_message == "0")
+      {
+            digitalWrite(ledGPIO, HIGH);
+            client.publish(statusLedResponse, "1");
+            Serial.println("led on");
+      }  
+      else
+      {
         digitalWrite(ledGPIO, LOW);
-    }
-    if(strcmp(topic,statusFan) == 0)
-    {
-      // Serial.println("fan");
-      if(incoming_message == "1")
-        digitalWrite(fanGPIO, HIGH);
-      else if(incoming_message == "0")
-        digitalWrite(fanGPIO, LOW);
+        client.publish(statusLedResponse, "0");
+      }
         
-      
     }
-
-    if(strcmp(topic,statusAirConditioner) == 0)
+    if(strcmp(topic,statusFanRequest) == 0)
     {
-      // Serial.println("smart ac");
-      if(incoming_message == "1")
-        digitalWrite(airConditioner, HIGH);
-      else if(incoming_message == "0")
-        digitalWrite(airConditioner, LOW);
+      if(strcmp(incoming_message.c_str(), "1") == 0)
+      {
+            digitalWrite(fanGPIO, HIGH);
+             client.publish(statusFanResponse, "1");
+      }
+        
+      else
+      {
+         digitalWrite(fanGPIO, LOW);
+        client.publish(statusFanResponse, "0");
+      }    
     }
-   
-
+    if(strcmp(topic,statusAirConditionerRequest) == 0)
+    {
+      if(strcmp(incoming_message.c_str(), "1") == 0)
+      {
+            digitalWrite(airConditioner, HIGH);
+            client.publish(statusAirConditionerResponse, "1");
+      }
+      else 
+      {
+            digitalWrite(airConditioner, LOW);
+            client.publish(statusAirConditionerResponse, "0");
+      }
+    }
 }
 void set_up_wifi()
 {
@@ -143,7 +136,6 @@ void set_up_wifi()
   }
    Serial.println("\nConnected to the WiFi network");
    Serial.println(WiFi.localIP());
-
 }
 void setup_led()
 {
@@ -154,20 +146,15 @@ void setup_led()
 void setup() {
     set_up_wifi();
     setup_led();
-    espClient.setInsecure();
     client.setServer(mqtt_server, mqtt_port);
     client.setCallback(call_back);
 }
-
 void loop() {
     if(!client.connected())
     {
       connect_mqtt_broker();
-
     }
     client.loop();
-    
- 
    unsigned long currentMillis = millis();
    if(currentMillis - lastSend >= sendInterval)
    {

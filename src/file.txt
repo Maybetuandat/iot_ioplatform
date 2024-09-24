@@ -1,0 +1,1 @@
+mosquitto_sub -h 192.168.2.19 -u maybetuandat -P 1 -t "home/sensor/data" -p 1883
